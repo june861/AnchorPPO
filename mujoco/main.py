@@ -1,14 +1,15 @@
 import argparse
 import random
 import time
-
+import wandb
 import gymnasium as gym
 import numpy as np
 import torch
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-
+from config import get_config
+from utils import check_path
 from agent import Agent
 from trainer import Trainer
 
@@ -36,6 +37,11 @@ def get_args():
     # This is for PPO
     parser.add_argument('--adaptive_learning_rate', type=bool, default=False)
     parser.add_argument('--desired_kl', type=float, default=0.01)
+    
+    # AIS-PPO
+    parser.add_argument('--action_num', type=int, default=1)
+    parser.add_argument('--use_tensorboard', action='store_false', default=True)
+    
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps)
     args.minibatch_size = int(args.batch_size // args.mini_batches)
@@ -57,30 +63,47 @@ def make_env(env_id, gamma):
 
 
 def main(env_id, seed, algo):
-    args = get_args()
-    args.env_id = env_id
-    args.seed = seed
-    args.algo = algo
+    args = get_config()
 
     # Adaptive learning rate
     if args.adaptive_learning_rate and args.algo == 'ppo':
         args.learning_rate_decay = False
 
     # Different algorithms
-    run_name = (
-            args.algo + '_' + str(args.epsilon) +
-            '_layers_' + str(args.policy_layers) +
-            '_mini_bs_' + str(args.minibatch_size) +
-            '_seed_' + str(args.seed)
+    # path_string = str(args.env_id)[:-14] + '/' + run_name
+    check_path(args.run_dir, args.logger)
+    writer = SummaryWriter(args.run_dir)
+    writer.add_text(
+        'Hyperparameter',
+        '|param|value|\n|-|-|\n%s' % ('\n'.join([f'|{key}|{value}|' for key, value in vars(args).items()]))
     )
-    if args.adaptive_learning_rate and args.algo == 'ppo':
-        run_name += '_adaptive_lr'
-    assert args.algo in ['ppo', 'tr-ppo', 'spo'], 'wrong algorithm name'
-    print('[algorithm:', args.algo + ']', '[env:', args.env_id + ']', '[seed:', str(args.seed) + ']')
 
-    # Save training logs
-    path_string = str(args.env_id) + '/' + run_name
-    writer = SummaryWriter(path_string)
+
+    if args.use_wandb:
+        if args.project_name == None:
+            args.project_name = 'atari'
+        if args.algo == 'appo':
+            all_act_sampled = 'all' if args.use_all else 'two'
+            run_name = f'atari-{args.env_id}-{args.algo}_{all_act_sampled}-seed{args.seed}-epoch{args.update_epochs}-{int(time.time())}'
+            group_name = f'atari-{args.env_id}-{args.algo}_{all_act_sampled}-epoch{args.update_epochs}'
+        else:
+            run_name = f'atari-{args.env_id}-{args.algo}-seed{args.seed}-epoch{args.update_epochs}-{int(time.time())}'
+            group_name = f'atari-{args.env_id}-{args.algo}-epoch{args.update_epochs}'
+        wandb.init(
+            project=args.project_name,
+            sync_tensorboard=True,
+            config=vars(args),
+            name=run_name,
+            group=group_name,
+            monitor_gym=True,
+            save_code=True,
+        )
+
+    
+    
+    # path_string = str(args.env_id)[:-14] + '/' + run_name
+    check_path(args.run_dir, args.logger)
+    writer = SummaryWriter(args.run_dir)
     writer.add_text(
         'Hyperparameter',
         '|param|value|\n|-|-|\n%s' % ('\n'.join([f'|{key}|{value}|' for key, value in vars(args).items()]))
@@ -106,8 +129,8 @@ def main(env_id, seed, algo):
 
     # Initialize buffer
     obs = torch.zeros((args.num_steps, args.num_envs) + envs.single_observation_space.shape).to(device)
-    actions = torch.zeros((args.num_steps, args.num_envs) + envs.single_action_space.shape).to(device)
-    log_probs = torch.zeros((args.num_steps, args.num_envs)).to(device)
+    actions = torch.zeros((args.num_steps, args.num_envs) + (args.sample_action_num, ) + envs.single_action_space.shape).to(device)
+    log_probs = torch.zeros((args.num_steps, args.num_envs) + (args.sample_action_num, )).to(device)
     rewards = torch.zeros((args.num_steps, args.num_envs)).to(device)
     dones = torch.zeros((args.num_steps, args.num_envs)).to(device)
     values = torch.zeros((args.num_steps, args.num_envs)).to(device)
@@ -151,7 +174,7 @@ def main(env_id, seed, algo):
             std[step] = mean_std.scale
 
             # Update the environments
-            next_obs, reward, terminations, truncations, info = envs.step(action.cpu().numpy())
+            next_obs, reward, terminations, truncations, info = envs.step(action[:,0,:].cpu().numpy())
             done = np.logical_or(terminations, truncations)
             rewards[step] = torch.tensor(reward).to(device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(device), torch.Tensor(done).to(device)
@@ -163,7 +186,6 @@ def main(env_id, seed, algo):
                 if item is None:
                     continue
                 writer.add_scalar('charts/episodic_return', item['episode']['r'][0], global_step)
-
                 # This is for plotting
                 if update == update_index:
                     episodic_returns.append(item['episode']['r'][0])
@@ -190,8 +212,8 @@ def main(env_id, seed, algo):
         # ---------------------- We have collected enough data, now let's start training ---------------------- #
         # Flatten each batch
         b_obs = obs.reshape((-1,) + envs.single_observation_space.shape)
-        b_log_probs = log_probs.reshape(-1)
-        b_actions = actions.reshape((-1,) + envs.single_action_space.shape)
+        b_log_probs = log_probs.reshape((-1,) + (args.sample_action_num,))
+        b_actions = actions.reshape((-1,) +  (args.sample_action_num,) +envs.single_action_space.shape)
         b_advantages = advantages.reshape(-1)
         b_returns = returns.reshape(-1)
         b_values = values.reshape(-1)
@@ -218,17 +240,18 @@ def run(algo):
     Choose the environments and random seeds
     """
     for env_id in [
-        # 'Ant-v4',
-        # 'HalfCheetah-v4',
-        # 'Hopper-v4',
+        'Ant-v4',
+        'HalfCheetah-v4',
+        'Hopper-v4',
         'Humanoid-v4',
-        # 'HumanoidStandup-v4',
-        # 'Walker2d-v4'
+        'HumanoidStandup-v4',
+        'Walker2d-v4'
     ]:
-        for seed in [1, 2, 3, 4, 5]:
+        for seed in [1]:
             main(env_id, seed, algo)
 
 
 if __name__ == '__main__':
     # ppo or spo
     run('spo')
+    run('ppo')

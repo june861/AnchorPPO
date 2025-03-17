@@ -1,9 +1,10 @@
 import argparse
 import time
-
+import sys
 import gymnasium as gym
 import numpy as np
 import torch
+import wandb
 from stable_baselines3.common.atari_wrappers import (
     ClipRewardEnv,
     EpisodicLifeEnv,
@@ -13,39 +14,40 @@ from stable_baselines3.common.atari_wrappers import (
 )
 from torch import optim
 from torch.utils.tensorboard.writer import SummaryWriter
-from tqdm import tqdm
-
+from tqdm import tqdm, trange
+from utils import check_path
 from agent import Agent
 from buffer import Buffer
 from trainer import Trainer
+from config import get_config
 
 
-def get_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--use_resnet', type=bool, default=True)
-    parser.add_argument('--use_cuda', type=bool, default=True)
-    parser.add_argument('--torch_deterministic', type=bool, default=True)
-    parser.add_argument('--total_time_steps', type=int, default=int(1e7))
-    parser.add_argument('--learning_rate', type=float, default=2.5e-4)
-    parser.add_argument('--learning_rate_decay', type=bool, default=True)
-    parser.add_argument('--num_envs', type=int, default=8)
-    parser.add_argument('--num_steps', type=int, default=128)
-    parser.add_argument('--gamma', type=float, default=0.99)
-    parser.add_argument('--gae_lambda', type=float, default=0.95)
-    parser.add_argument('--mini_batches', type=int, default=4)
-    parser.add_argument('--update_epochs', type=int, default=4)
-    parser.add_argument('--advantage_normalization', type=bool, default=True)
-    parser.add_argument('--clip_value_loss', type=bool, default=True)
-    parser.add_argument('--c_1', type=float, default=0.5)
-    parser.add_argument('--c_2', type=float, default=0.01)
-    parser.add_argument('--max_grad_norm', type=float, default=0.5)
-    parser.add_argument('--epsilon', type=float, default=0.2)
-    args = parser.parse_args()
-    args.device = torch.device('cuda' if torch.cuda.is_available() and args.use_cuda else 'cpu')
-    args.batch_size = int(args.num_envs * args.num_steps)
-    args.minibatch_size = int(args.batch_size // args.mini_batches)
-    args.num_updates = int(args.total_time_steps // args.batch_size)
-    return args
+# def get_args():
+#     parser = argparse.ArgumentParser()
+#     parser.add_argument('--use_resnet', type=bool, default=True)
+#     parser.add_argument('--use_cuda', type=bool, default=True)
+#     parser.add_argument('--torch_deterministic', type=bool, default=True)
+#     parser.add_argument('--total_time_steps', type=int, default=int(1e7))
+#     parser.add_argument('--learning_rate', type=float, default=2.5e-4)
+#     parser.add_argument('--learning_rate_decay', type=bool, default=True)
+#     parser.add_argument('--num_envs', type=int, default=8)
+#     parser.add_argument('--num_steps', type=int, default=128)
+#     parser.add_argument('--gamma', type=float, default=0.99)
+#     parser.add_argument('--gae_lambda', type=float, default=0.95)
+#     parser.add_argument('--mini_batches', type=int, default=4)
+#     parser.add_argument('--update_epochs', type=int, default=4)
+#     parser.add_argument('--advantage_normalization', type=bool, default=True)
+#     parser.add_argument('--clip_value_loss', type=bool, default=True)
+#     parser.add_argument('--c_1', type=float, default=0.5)
+#     parser.add_argument('--c_2', type=float, default=0.01)
+#     parser.add_argument('--max_grad_norm', type=float, default=0.5)
+#     parser.add_argument('--epsilon', type=float, default=0.2)
+#     args = parser.parse_args()
+#     args.device = torch.device('cuda' if torch.cuda.is_available() and args.use_cuda else 'cpu')
+#     args.batch_size = int(args.num_envs * args.num_steps)
+#     args.minibatch_size = int(args.batch_size // args.mini_batches)
+#     args.num_updates = int(args.total_time_steps // args.batch_size)
+#     return args
 
 
 def make_env(env_id):
@@ -77,22 +79,45 @@ def compute_advantages(rewards, flags, values, next_value, args):
     return advantages
 
 
-def train(algo, env_id, seed):
-    args = get_args()
-    args.env_id = env_id
-    args.seed = seed
-    args.algo = algo
+def train():
+
+    args = get_config()
+
+    # args.algo = algo
     network = 'resnet' if args.use_resnet else 'cnn'
     run_name = args.algo + '_' + str(args.epsilon) + '_' + network + '_seed_' + str(args.seed)
     print('[algorithm:', args.algo + ']', '[env:', args.env_id + ']', '[seed:', str(args.seed) + ']')
 
-    # Save training logs
-    path_string = str(args.env_id)[:-14] + '/' + run_name
-    writer = SummaryWriter(path_string)
+    
+    
+    # path_string = str(args.env_id)[:-14] + '/' + run_name
+    check_path(args.run_dir, args.logger)
+    writer = SummaryWriter(args.run_dir)
     writer.add_text(
         'Hyperparameter',
         '|param|value|\n|-|-|\n%s' % ('\n'.join([f'|{key}|{value}|' for key, value in vars(args).items()]))
     )
+
+
+    if args.use_wandb:
+        if args.project_name == None:
+            args.project_name = 'atari'
+        if args.algo == 'appo':
+            all_act_sampled = 'all' if args.use_all else 'two'
+            run_name = f'atari-{args.env_id}-{args.algo}_{all_act_sampled}-seed{args.seed}-epoch{args.update_epochs}-{int(time.time())}'
+            group_name = f'atari-{args.env_id}-{args.algo}_{all_act_sampled}-epoch{args.update_epochs}'
+        else:
+            run_name = f'atari-{args.env_id}-{args.algo}-seed{args.seed}-epoch{args.update_epochs}-{int(time.time())}'
+            group_name = f'atari-{args.env_id}-{args.algo}-epoch{args.update_epochs}'
+        wandb.init(
+            project=args.project_name,
+            sync_tensorboard=True,
+            config=vars(args),
+            name=run_name,
+            group=group_name,
+            monitor_gym=True,
+            save_code=True,
+        )
 
     # Initialize environments
     envs = gym.vector.AsyncVectorEnv([make_env(args.env_id) for _ in range(args.num_envs)])
@@ -117,14 +142,20 @@ def train(algo, env_id, seed):
     trainer = Trainer(args, agent, optimizer, writer)
 
     # Initialize buffer
-    rollout_buffer = Buffer(args.num_steps, args.num_envs, observation_shape, args.device)
+    rollout_buffer = Buffer(
+        num_steps = args.num_steps, 
+        num_envs = args.num_envs, 
+        observation_shape = observation_shape, 
+        device = args.device, 
+        discrete_action_n = num_actions,
+    )
     global_step = 0
     start_time = time.time()
 
     # This is for plotting
     episodic_returns = []
     update_index = 0
-    for update in tqdm(range(1, args.num_updates + 1)):
+    for update in trange(1, args.num_updates + 1):
 
         # Linear decay of learning rate
         if args.learning_rate_decay:
@@ -137,7 +168,7 @@ def train(algo, env_id, seed):
 
             # Compute the logarithm of the action probability output by the old policy network
             with torch.no_grad():
-                action, log_prob, _, value = agent.get_action_and_value(
+                action, log_prob, _, value, total_logits = agent.get_action_and_value(
                     torch.from_numpy(state).to(args.device).float()
                 )
             action = action.cpu().numpy()
@@ -149,25 +180,28 @@ def train(algo, env_id, seed):
             flag = 1.0 - np.logical_or(terminated, truncated)
             log_prob = log_prob.cpu().numpy()
             value = value.cpu().numpy()
-            rollout_buffer.push(state, action, reward, flag, log_prob, value)
+            total_logits = total_logits.cpu().numpy()
+            rollout_buffer.push(state, action, reward, flag, log_prob, value, total_logits)
             state = next_state
 
             if 'final_info' in all_info:
                 for info in all_info['final_info']:
                     if info and 'episode' in info:
                         writer.add_scalar('charts/episodic_return', info['episode']['r'], global_step)
+                        # args.logger.info(f"global_step is {global_step}, episodic return is {info['episode']['r']}")
                         if update // 15 == update_index:
                             episodic_returns.append(info['episode']['r'])
                         else:
                             writer.add_scalar(
-                                'This is for plotting/average_return', np.mean(episodic_returns), update_index + 1
+                                'charts/average_return', np.mean(episodic_returns), update_index + 1
                             )
                             episodic_returns.clear()
                             episodic_returns.append(info['episode']['r'])
                             update_index += 1
+                            
 
         # ---------------------- We have collected enough data, now let's start training ---------------------- #
-        states, actions, rewards, flags, log_probs, values = rollout_buffer.get()
+        states, actions, rewards, flags, log_probs, values, old_logits = rollout_buffer.get()
 
         # Use GAE technique to estimate the advantage
         with torch.no_grad():
@@ -182,9 +216,20 @@ def train(algo, env_id, seed):
         b_returns = returns.reshape(-1)
         b_advantages = advantages.reshape(-1)
         b_values = values.reshape(-1)
+        b_old_logits = old_logits.reshape((-1, num_actions)) # shape is (num_steps* num_envs, num_actions)
 
         # Update the policy network and value network
-        trainer.train(numpy_rng, global_step, b_states, b_actions, b_log_probs, b_advantages, b_returns, b_values)
+        trainer.train(
+            numpy_rng = numpy_rng, 
+            global_step = global_step, 
+            b_obs =  b_states, 
+            b_actions = b_actions, 
+            b_log_probs = b_log_probs, 
+            b_advantages = b_advantages, 
+            b_returns = b_returns, 
+            b_values = b_values, 
+            b_old_logits = b_old_logits,
+        )
 
         explained_var = (
             np.nan if torch.var(b_returns) == 0 else 1 - torch.var(b_returns - b_values) / torch.var(b_returns)
@@ -197,17 +242,16 @@ def train(algo, env_id, seed):
     writer.close()
 
 
-def main(algo):
-    for env_id in [
-        'Assault',
-        'Asterix',
-        'BeamRider',
-        'SpaceInvaders',
-    ]:
-        for seed in [1, 2, 3]:
-            train(algo, env_id + 'NoFrameskip-v4', seed)
+# def main(algo):
+#     for env_id in [
+#         'Assault',
+#         'Asterix',
+#         'BeamRider',
+#         'SpaceInvaders',
+#     ]:
+#         for seed in [1, 2, 3]:
+#             train(algo, env_id + 'NoFrameskip-v4', seed)
 
 
 if __name__ == '__main__':
-    # ppo or spo
-    main('spo')
+    train()

@@ -39,4 +39,5 @@ class Agent(nn.Module):
         distribution = Categorical(logits=self.actor(hidden))
         if action is None:
             action = distribution.sample()
-        return action, distribution.log_prob(action), distribution.entropy(), self.critic(hidden).squeeze(-1)
+        # junweiluo
+        return action, distribution.log_prob(action), distribution.entropy(), self.critic(hidden).squeeze(-1), distribution.logits
