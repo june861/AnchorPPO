@@ -11,9 +11,9 @@ def get_config():
     parser = argparse.ArgumentParser()
     parser.add_argument('--env_id', type=str, default="AssaultNoFrameskip-v4")
     parser.add_argument('--seed', type=int, default=1)
-    parser.add_argument('--algo', type=str, default='ppo', choices=['ppo', 'appo', 'spo', 'appo-pow'])
+    parser.add_argument('--algo', type=str, default='ppo', choices=['ppo', 'appo-all', 'appo-two', 'spo', 'appo-pow'])
     
-    parser.add_argument('--use_resnet', type=bool, default=True)
+    parser.add_argument('--use_resnet', type=bool, default=False)
     parser.add_argument('--use_cuda', type=bool, default=True)
     parser.add_argument('--torch_deterministic', type=bool, default=True)
     parser.add_argument('--total_time_steps', type=int, default=int(1e7))

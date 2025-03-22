@@ -7,6 +7,8 @@
 @Version    :python
 '''
 
+import time
+import wandb
 import os
 
 def check_path(path: str, logger):
@@ -17,3 +19,23 @@ def check_path(path: str, logger):
     else:
         logger.info(f"Path '{path}' already exists.")
 
+
+def start_wandb_proj(args):
+    if args.project_name == None:
+        args.project_name = 'atari'
+    if args.algo == 'appo':
+        all_act_sampled = 'all' if args.use_all else 'two'
+        run_name = f'atari-{args.env_id}-{args.algo}_{all_act_sampled}-seed{args.seed}-epoch{args.update_epochs}-{int(time.time())}'
+        group_name = f'atari-{args.env_id}-{args.algo}_{all_act_sampled}-epoch{args.update_epochs}'
+    else:
+        run_name = f'atari-{args.env_id}-{args.algo}-seed{args.seed}-epoch{args.update_epochs}-{int(time.time())}'
+        group_name = f'atari-{args.env_id}-{args.algo}-epoch{args.update_epochs}'
+    wandb.init(
+        project=args.project_name,
+        sync_tensorboard=True,
+        config=vars(args),
+        name=run_name,
+        group=group_name,
+        monitor_gym=True,
+        save_code=True,
+    )

@@ -1,2 +1,11 @@
+# 忽略所有 .pyc 文件
+*.pyc
+__pycache__/
+
+
+# 忽略log
+*.log
+
+# 忽略tensorboard和wandb日志目录
 runs/
 wandb/

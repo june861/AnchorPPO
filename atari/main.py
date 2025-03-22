@@ -5,6 +5,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 import wandb
+import os
 from stable_baselines3.common.atari_wrappers import (
     ClipRewardEnv,
     EpisodicLifeEnv,
@@ -12,14 +13,15 @@ from stable_baselines3.common.atari_wrappers import (
     MaxAndSkipEnv,
     NoopResetEnv
 )
+from config import get_config
 from torch import optim
-from torch.utils.tensorboard.writer import SummaryWriter
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm, trange
-from utils import check_path
+from utils import check_path, start_wandb_proj
 from agent import Agent
 from buffer import Buffer
 from trainer import Trainer
-from config import get_config
+
 
 
 # def get_args():
@@ -85,39 +87,22 @@ def train():
 
     # args.algo = algo
     network = 'resnet' if args.use_resnet else 'cnn'
-    run_name = args.algo + '_' + str(args.epsilon) + '_' + network + '_seed_' + str(args.seed)
+    # run_name = args.env_id + '_' + args.algo + '_' + str(args.epsilon) + '_' + network + '_seed_' + str(args.seed) + '_' + str(int(time.time()))
+    run_name = f'{args.env_id}_{args.algo}_{str(args.epsilon)}_{network}_seed{str(args.seed)}_{str(int(time.time()))}'
     print('[algorithm:', args.algo + ']', '[env:', args.env_id + ']', '[seed:', str(args.seed) + ']')
 
-    
+    if args.use_wandb:
+        start_wandb_proj(args)
     
     # path_string = str(args.env_id)[:-14] + '/' + run_name
+
     check_path(args.run_dir, args.logger)
-    writer = SummaryWriter(args.run_dir)
+    writer_rundir = os.path.join(args.run_dir, run_name)
+    writer = SummaryWriter(writer_rundir)
     writer.add_text(
         'Hyperparameter',
         '|param|value|\n|-|-|\n%s' % ('\n'.join([f'|{key}|{value}|' for key, value in vars(args).items()]))
     )
-
-
-    if args.use_wandb:
-        if args.project_name == None:
-            args.project_name = 'atari'
-        if args.algo == 'appo':
-            all_act_sampled = 'all' if args.use_all else 'two'
-            run_name = f'atari-{args.env_id}-{args.algo}_{all_act_sampled}-seed{args.seed}-epoch{args.update_epochs}-{int(time.time())}'
-            group_name = f'atari-{args.env_id}-{args.algo}_{all_act_sampled}-epoch{args.update_epochs}'
-        else:
-            run_name = f'atari-{args.env_id}-{args.algo}-seed{args.seed}-epoch{args.update_epochs}-{int(time.time())}'
-            group_name = f'atari-{args.env_id}-{args.algo}-epoch{args.update_epochs}'
-        wandb.init(
-            project=args.project_name,
-            sync_tensorboard=True,
-            config=vars(args),
-            name=run_name,
-            group=group_name,
-            monitor_gym=True,
-            save_code=True,
-        )
 
     # Initialize environments
     envs = gym.vector.AsyncVectorEnv([make_env(args.env_id) for _ in range(args.num_envs)])
