@@ -1,8 +1,8 @@
 update_epochs=(4)
 algos=(
-    "ppo"
     "appo-all"
     "appo-two"
+    "ppo"
     # "appo-pow"
     # "spo"
 )
