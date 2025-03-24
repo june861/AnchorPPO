@@ -26,7 +26,9 @@ class Agent(nn.Module):
                 nn.ReLU(),
                 nn.Flatten(),
                 layer_init(nn.Linear(64 * 7 * 7, 512)),
-                nn.ReLU()
+                nn.LayerNorm(512),
+                nn.ReLU(),
+                
             )
         self.actor = layer_init(nn.Linear(512, num_actions), std=0.01)
         self.critic = layer_init(nn.Linear(512, 1), std=1)

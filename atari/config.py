@@ -9,11 +9,12 @@ from prettytable import PrettyTable
 
 def get_config():
     parser = argparse.ArgumentParser()
+    # BreakoutNoFrameskip-v4 AssaultNoFrameskip-v4
     parser.add_argument('--env_id', type=str, default="AssaultNoFrameskip-v4")
     parser.add_argument('--seed', type=int, default=1)
-    parser.add_argument('--algo', type=str, default='appo-two', choices=['ppo', 'appo-all', 'appo-two', 'spo', 'appo-pow'])
+    parser.add_argument('--algo', type=str, default='appo-all', choices=['ppo', 'appo-all', 'appo-two', 'spo', 'appo-pow'])
     
-    parser.add_argument('--use_resnet', type=bool, default=True)
+    parser.add_argument('--use_resnet', type=bool, default=False)
     parser.add_argument('--use_cuda', type=bool, default=True)
     parser.add_argument('--torch_deterministic', type=bool, default=True)
     parser.add_argument('--total_time_steps', type=int, default=int(1e7))
@@ -31,7 +32,8 @@ def get_config():
     parser.add_argument('--c_2', type=float, default=0.01)
     parser.add_argument('--max_grad_norm', type=float, default=0.5)
     parser.add_argument('--epsilon', type=float, default=0.2)
-    
+    parser.add_argument('--epsilon_2', type=float, default=0.2)
+
     parser.add_argument('--use_wandb', action='store_false', default=True)
     parser.add_argument('--project_name', type=str, default=None)
     parser.add_argument('--use_all', action='store_false', default=True)

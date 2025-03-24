@@ -22,34 +22,7 @@ from agent import Agent
 from buffer import Buffer
 from trainer import Trainer
 
-
-
-# def get_args():
-#     parser = argparse.ArgumentParser()
-#     parser.add_argument('--use_resnet', type=bool, default=True)
-#     parser.add_argument('--use_cuda', type=bool, default=True)
-#     parser.add_argument('--torch_deterministic', type=bool, default=True)
-#     parser.add_argument('--total_time_steps', type=int, default=int(1e7))
-#     parser.add_argument('--learning_rate', type=float, default=2.5e-4)
-#     parser.add_argument('--learning_rate_decay', type=bool, default=True)
-#     parser.add_argument('--num_envs', type=int, default=8)
-#     parser.add_argument('--num_steps', type=int, default=128)
-#     parser.add_argument('--gamma', type=float, default=0.99)
-#     parser.add_argument('--gae_lambda', type=float, default=0.95)
-#     parser.add_argument('--mini_batches', type=int, default=4)
-#     parser.add_argument('--update_epochs', type=int, default=4)
-#     parser.add_argument('--advantage_normalization', type=bool, default=True)
-#     parser.add_argument('--clip_value_loss', type=bool, default=True)
-#     parser.add_argument('--c_1', type=float, default=0.5)
-#     parser.add_argument('--c_2', type=float, default=0.01)
-#     parser.add_argument('--max_grad_norm', type=float, default=0.5)
-#     parser.add_argument('--epsilon', type=float, default=0.2)
-#     args = parser.parse_args()
-#     args.device = torch.device('cuda' if torch.cuda.is_available() and args.use_cuda else 'cpu')
-#     args.batch_size = int(args.num_envs * args.num_steps)
-#     args.minibatch_size = int(args.batch_size // args.mini_batches)
-#     args.num_updates = int(args.total_time_steps // args.batch_size)
-#     return args
+torch.autograd.set_detect_anomaly(True)
 
 
 def make_env(env_id):
@@ -64,6 +37,7 @@ def make_env(env_id):
         env = ClipRewardEnv(env)
         env = gym.wrappers.ResizeObservation(env, (84, 84))
         env = gym.wrappers.GrayScaleObservation(env)
+        
         env = gym.wrappers.FrameStack(env, 4)
         return env
     return thunk
@@ -110,6 +84,8 @@ def train():
     # State space and action space
     observation_shape = envs.single_observation_space.shape
     num_actions = envs.single_action_space.n
+
+    args.num_actions = num_actions
 
     # Random seed
     if args.torch_deterministic:

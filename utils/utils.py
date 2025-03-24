@@ -39,3 +39,15 @@ def start_wandb_proj(args):
         monitor_gym=True,
         save_code=True,
     )
+
+
+def monitor_gradient(network, writer =  None):
+    total_norm = 0
+    for p in network.parameters():
+        if p.grad is not None:
+            param_norm = p.grad.data.norm(2)
+            total_norm += param_norm.item() ** 2
+    total_norm = total_norm ** 0.5
+    if writer:
+        writer.add_scalar('losses/grad_', total_norm)
+    return total_norm

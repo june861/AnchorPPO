@@ -14,7 +14,7 @@ class Buffer:
         self.num_steps = num_steps
         self.device = device
         # junweiluo：增加一个收录全部动作的buffer
-        self.total_logits = np.zeros((num_steps, num_envs, discrete_action_n))
+        self.total_logits = np.zeros((num_steps, num_envs, discrete_action_n), dtype=np.float32)
         self.discrete_action_shape = discrete_action_n
 
     def push(self, state, action, reward, flag, log_prob, value, total_logits):

@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.distributions import Categorical
+from utils import monitor_gradient
 
 class Trainer:
     def __init__(self, args, agent, optimizer, writer):
@@ -11,6 +12,7 @@ class Trainer:
         self.writer = writer
         # junweiluo
         self.batch_index = 0
+        self.pow_epsilon = self.args.num_actions - 1 if self.args.algo == 'appo-all' else 1
 
     def train(self, numpy_rng, global_step, b_obs, b_actions, b_log_probs, b_advantages, b_returns, b_values, b_old_logits):
         b_index = np.arange(self.args.batch_size)
@@ -46,11 +48,14 @@ class Trainer:
                 # Total loss
                 loss = policy_loss + value_loss * self.args.c_1 - entropy_loss * self.args.c_2
 
-                self.writer.add_scalar('charts/ratio_deviation', torch.abs(ratios - 1).mean(), self.batch_index)
-                self.writer.add_scalar('charts/ratio1_deviation', torch.abs(ratio1 - 1).mean(), self.batch_index)
-                self.writer.add_scalar('charts/ratio2_deviation', torch.abs(ratio2 - 1).mean(), self.batch_index)
+                self.writer.add_scalar('charts/ratio_deviation', (ratios - 1).mean(), self.batch_index)
+                self.writer.add_scalar('charts/ratio1_deviation', (ratio1 - 1).mean(), self.batch_index)
+                self.writer.add_scalar('charts/ratio2_deviation', (ratio2 - 1).mean(), self.batch_index)
 
                 
+                self.writer.add_scalar('imp_weights/ratio', ratios.mean(), self.batch_index)
+                self.writer.add_scalar('imp_weights/ratio1', ratio1.mean(), self.batch_index)
+                self.writer.add_scalar('imp_weights/ratio2', ratio2.mean(), self.batch_index)
                 # junweiluo: log adv relevant data
                 # indice_larger_0 = np.where(b_returns[mb_index].detach().cpu().numpy() > 0)[0]
                 # indice_smaller_0 = np.where(b_returns[mb_index].detach().cpu().numpy() < 0)[0]
@@ -91,7 +96,10 @@ class Trainer:
                 grad = nn.utils.clip_grad_norm_(self.agent.parameters(), self.args.max_grad_norm)
                 self.writer.add_scalar('losses/grad_norm', grad, self.batch_index)
                 self.optimizer.step()
+                
+                
                 self.batch_index += 1
+
         
         self.writer.add_scalar('losses/policy_loss', policy_loss.item(), self.batch_index)
         self.writer.add_scalar('losses/value_loss', value_loss.item(), self.batch_index)
@@ -154,8 +162,7 @@ class Trainer:
         policy_loss = -torch.min(policy_loss_1, policy_loss_2).mean()
         return policy_loss, ratios, ratio_1, ratio_1
 
-
-    # ========== APPO-All & APPO-Two Loss ==========
+    
     def _compute_appo_all_two_loss(self, ratios, mb_advantages, b_old_logits, new_logits, b_actions):
         ratio1 = ratios.detach()
         num_alter_actions = b_old_logits.shape[1] - 1 if self.args.algo == 'appo-all' else 1
@@ -170,8 +177,14 @@ class Trainer:
         log_ratio2 = new_logprobs - old_logprobs
         if len(log_ratio2.shape) == 1:
             log_ratio2 = log_ratio2.unsqueeze(1)
-        ratio2 = torch.sum(log_ratio2, dim=1).exp().detach()
+        # 乘积形式
+        ratio2 = torch.sum(log_ratio2, dim=1).exp()
+        # raw_ratio2 = torch.pow(raw_ratio2,  1 / num_alter_actions)
+        ratio2 = torch.clamp(ratio2, 1 - self.args.epsilon_2, 1 + self.args.epsilon_2)
         ratios = ratios * ratio2
+        # 取均值的形式
+        # ratio2 = torch.sum(log_ratio2.exp(), dim = 1).detach()
+        # ratios = (ratios + ratio2) / (num_alter_actions + 1)
         policy_loss_1 = mb_advantages * ratios
         policy_loss_2 = mb_advantages * torch.clamp(
             ratios, 1 - self.args.epsilon, 1 + self.args.epsilon
@@ -193,61 +206,3 @@ class Trainer:
     def _algo_not_implemented(self, *args):
         self.args.logger.error(f'Not Implemented for such algo: {self.args.algo}')
         raise NotImplementedError(f'Algorithm {self.args.algo} is not implemented')
-
-
-    # def compute_policy_loss(self, ratios, mb_advantages, b_old_logits, new_logits, b_actions):
-    #     """
-    #     Compute the policy loss
-    #     """
-    #     if self.args.algo == 'ppo':
-    #         policy_loss_1 = mb_advantages * ratios
-    #         policy_loss_2 = mb_advantages * torch.clamp(
-    #             ratios, 1 - self.args.epsilon, 1 + self.args.epsilon
-    #         )
-    #         policy_loss = -torch.min(policy_loss_1, policy_loss_2).mean()
-    #         return policy_loss, ratios, ratios, ratios
-
-    #     if self.args.algo == 'appo-pow':
-    #         ratio_1 = ratios.detach()
-    #         ratios = ratios * ratio_1
-    #         policy_loss_1 = mb_advantages * ratios
-    #         policy_loss_2 = mb_advantages * torch.clamp(
-    #             ratios, 1 - self.args.epsilon, 1 + self.args.epsilon
-    #         )
-    #         policy_loss = -torch.min(policy_loss_1, policy_loss_2).mean()
-            
-    #         return policy_loss, ratios, ratio_1, ratio_1
-        
-    #     if self.args.algo == 'appo-all' or self.args.algo == "appo-two":
-    #         ratio1 = ratios.detach()
-    #         num_alter_actions = b_old_logits.shape[1] - 1 if self.args.algo == 'appo-all' else 1
-    #         mask_ = torch.ones_like(b_old_logits)
-    #         mask_[torch.arange(b_old_logits.shape[0]), b_actions] = 0.0
-    #         selected_indice = torch.multinomial(mask_, num_samples=num_alter_actions).squeeze()
-    #         selected_indice_0 = torch.arange(b_old_logits.shape[0])
-    #         if num_alter_actions > 1:
-    #             selected_indice_0 = selected_indice_0.unsqueeze(1).expand(-1, (num_alter_actions))
-    #         old_logprobs = b_old_logits[selected_indice_0, selected_indice]
-    #         new_logprobs = new_logits[selected_indice_0, selected_indice]
-    #         log_ratio2 = new_logprobs - old_logprobs
-    #         if len(log_ratio2.shape) == 1:
-    #             log_ratio2 = log_ratio2.unsqueeze(1)
-    #         ratio2 = torch.sum(log_ratio2, dim=1).exp()
-    #         ratios = ratios * ratio2
-    #         policy_loss_1 = mb_advantages * ratios
-    #         policy_loss_2 = mb_advantages * torch.clamp(
-    #             ratios, 1 - self.args.epsilon, 1 + self.args.epsilon
-    #         )
-    #         policy_loss = -torch.min(policy_loss_1, policy_loss_2).mean()
-            
-    #         return policy_loss, ratios, ratio1, ratio2
-        
-    #     if self.args.algo == 'spo':
-    #         policy_loss = -(
-    #                 mb_advantages * ratios -
-    #                 torch.abs(mb_advantages) * torch.pow(ratios - 1, 2) / (2 * self.args.epsilon)
-    #         ).mean()
-
-    #         return policy_loss, ratios, ratios, ratios
-
-    #     self.args.logger.error(f'Not Implement of such algo:{self.args.algo}')

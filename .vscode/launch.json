@@ -1,0 +1,37 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: Atari Training",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/atari/main.py",
+      "console": "integratedTerminal",
+      "args": [
+        "--env_id", "AssaultNoFrameskip-v4",
+        "--seed", "1",
+        "--algo", "appo-all",
+
+        "--total_time_steps", "10000000",
+        "--learning_rate", "0.00025",
+        "--num_envs", "8",
+        "--num_steps", "128",
+        "--gamma", "0.99",
+        "--gae_lambda", "0.95",
+        "--mini_batches", "4",
+        "--update_epochs", "4",
+        "--c_1", "0.5",
+        "--c_2", "0.01",
+        "--max_grad_norm", "0.5",
+        "--epsilon", "0.2",
+        // "--use_wandb",
+        "--use_all",
+        // "--run_dir", "${workspaceFolder}/runs/atari"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      }
+    }
+  ]
+}
+
